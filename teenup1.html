@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Climb the Mountain - Sandbox Mode</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #333;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden; /* Prevent scrollbars */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* --- The Floating Controls (Top Right) --- */
+        #controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 5px;
+        }
+
+        button {
+            cursor: pointer;
+            padding: 8px 12px;
+            font-size: 14px;
+            background: #eee;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button:hover { background: #ddd; }
+
+        #dice-btn {
+            background: #ff5722;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+            border: none;
+            width: 100%;
+            padding: 10px;
+        }
+        #dice-result {
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            margin-top: 5px;
+            min-height: 30px;
+        }
+
+        /* --- The Board Area --- */
+        #viewport {
+            width: 100%;
+            height: 100%;
+            cursor: grab; /* Indicates you can pan the board */
+            position: relative;
+            overflow: hidden;
+        }
+
+        #viewport:active {
+            cursor: grabbing;
+        }
+
+        #board-layer {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform-origin: 0 0; /* logic handled in JS */
+            /* We will transform this div using JS for zoom/pan */
+        }
+
+        #board-img {
+            display: block;
+            height: 900px; /* Base size */
+            pointer-events: none; /* Let clicks pass through to background for panning */
+            user-select: none;
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+        }
+
+        /* --- Player Tokens --- */
+        .token {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            position: absolute;
+            border: 3px solid white;
+            box-shadow: 0 4px 5px rgba(0,0,0,0.4);
+            cursor: move;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            text-shadow: 1px 1px 2px black;
+            font-size: 10px;
+            transform: translate(-50%, -50%); /* Center on coordinates */
+            transition: transform 0.1s;
+        }
+
+        .token:hover {
+            z-index: 100 !important; /* Bring hovered token to top */
+            transform: translate(-50%, -50%) scale(1.2);
+        }
+        
+        .token:active {
+            cursor: grabbing;
+        }
+
+        /* Token Colors */
+        .p1 { background: #E53935; } /* Red */
+        .p2 { background: #1E88E5; } /* Blue */
+        .p3 { background: #43A047; } /* Green */
+        .p4 { background: #FDD835; color: #333; text-shadow: none; } /* Yellow */
+        .p5 { background: #8E24AA; } /* Purple */
+        .p6 { background: #FB8C00; } /* Orange */
+        .p7 { background: #00ACC1; } /* Cyan */
+        .p8 { background: #D81B60; } /* Pink */
+
+    </style>
+</head>
+<body>
+
+    <div id="controls">
+        <button id="dice-btn" onclick="rollDie()">🎲 Roll Die</button>
+        <div id="dice-result">-</div>
+        <hr style="width:100%; border:0; border-top:1px solid #ccc;">
+        <div class="btn-group">
+            <button onclick="adjustZoom(0.1)">Zoom +</button>
+            <button onclick="adjustZoom(-0.1)">Zoom -</button>
+        </div>
+        <button onclick="resetView()" style="width:100%">Reset View</button>
+        <div class="btn-group">
+            <button onclick="reziseToken(0.1)">Token +</button>
+            <button onclick="reziseToken(-0.1)">Token -</button>
+        </div>
+    </div>
+
+    <div id="viewport">
+        <div id="board-layer">
+            <img src="boardTeenUp1.png" id="board-img" alt="Board">
+            
+            <div class="token p1" style="top: 90%; left: 8%;" data-id="1">P1</div>
+            <div class="token p2" style="top: 90%; left: 12%;" data-id="2">P2</div>
+            <div class="token p3" style="top: 90%; left: 16%;" data-id="3">P3</div>
+            <div class="token p4" style="top: 86%; left: 8%;" data-id="4">P4</div>
+            <div class="token p5" style="top: 86%; left: 12%;" data-id="5">P5</div>
+            <div class="token p6" style="top: 86%; left: 16%;" data-id="6">P6</div>
+            <div class="token p7" style="top: 82%; left: 8%;" data-id="7">P7</div>
+            <div class="token p8" style="top: 82%; left: 12%;" data-id="8">P8</div>
+        </div>
+    </div>
+
+<script>
+    // --- State Variables ---
+    let scale = 1;
+    let panX = 0;
+    let panY = 0;
+    
+    // Viewport State
+    let isPanning = false;
+    let panStartX = 0;
+    let panStartY = 0;
+
+    // Dragging State
+    let activeToken = null;
+    let tokenStartX = 0;
+    let tokenStartY = 0;
+    
+    // Elements
+    const boardLayer = document.getElementById('board-layer');
+    const viewport = document.getElementById('viewport');
+    const tokens = document.querySelectorAll('.token');
+
+    // --- Initialization ---
+    function init() {
+        centerBoard();
+        updateTransform();
+    }
+
+    function centerBoard() {
+        // Center the board in the viewport
+        const vpRect = viewport.getBoundingClientRect();
+        const img = document.getElementById('board-img');
+        
+        // Initial offset to center the 900px image
+        panX = (vpRect.width - img.width) / 2 - img.width;
+        panY = (vpRect.height - img.height) / 2 - img.height/2;
+        
+        // Mobile view adjustment
+        if(window.innerWidth < 800) {
+            scale = 0.5;
+            panX = (vpRect.width - (img.width * scale)) / 2;
+            panY = 50; 
+        }
+
+    }
+
+    // --- Die Function ---
+    function rollDie() {
+        const result = Math.floor(Math.random() * 6) + 1;
+        document.getElementById('dice-result').innerText = result;
+    }
+
+    // --- Zoom Logic ---
+    function adjustZoom(delta) {
+        scale += delta;
+        if (scale < 0.2) scale = 0.2;
+        if (scale > 3) scale = 3;
+        updateTransform();
+    }
+    
+    // Mouse wheel to zoom
+    viewport.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        adjustZoom(e.deltaY * -0.001);
+    });
+
+    function resetView() {
+        scale = 1;
+        centerBoard();
+        updateTransform();
+    }
+
+    function updateTransform() {
+        boardLayer.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+    }
+
+    // --- Interaction Logic (Unified Mouse/Touch) ---
+
+    // 1. Token Dragging Setup
+    tokens.forEach(token => {
+        token.addEventListener('mousedown', startDragToken);
+    });
+
+    function startDragToken(e) {
+        e.stopPropagation(); // Prevent board panning
+        e.preventDefault(); // Prevent text selection
+        activeToken = e.target;
+    }
+
+    // 2. Board Panning Setup
+    viewport.addEventListener('mousedown', (e) => {
+        isPanning = true;
+        panStartX = e.clientX - panX;
+        panStartY = e.clientY - panY;
+    });
+
+    function reziseToken(scale) {
+        let tokens = document.querySelectorAll('.token')
+        tokens.forEach((token) => {
+            if (!token.style.scale) {
+                token.style.scale = 1
+            }
+            token.style.scale = parseFloat(token.style.scale) + scale
+            console.log(token)}) 
+    }
+
+    // 3. Global Move Listener
+    document.addEventListener('mousemove', (e) => {
+        // A. Token Dragging
+        if (activeToken) {
+            e.preventDefault();
+            
+            // Calculate movement relative to the scaled board
+            // We need the bounding rect of the board layer (the container of the tokens)
+            const rect = boardLayer.getBoundingClientRect();
+            
+            // Calculate position relative to the board's top-left
+            const rawX = e.clientX - rect.left;
+            const rawY = e.clientY - rect.top;
+
+            // Adjust for scale
+            const x = rawX / scale;
+            const y = rawY / scale;
+
+            activeToken.style.left = x + 'px';
+            activeToken.style.top = y + 'px';
+        } 
+        
+        // B. Board Panning
+        else if (isPanning) {
+            e.preventDefault();
+            panX = e.clientX - panStartX;
+            panY = e.clientY - panStartY;
+            updateTransform();
+        }
+    });
+
+    // 4. Global Up Listener
+    document.addEventListener('mouseup', () => {
+        isPanning = false;
+        activeToken = null;
+    });
+
+    // Run
+    window.onload = init;
+
+</script>
+</body>
+</html>
